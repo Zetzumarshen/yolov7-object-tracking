@@ -218,10 +218,10 @@ def detect(save_img=False):
                                       if i < len(track.centroidarr)-1 ] 
 
                     if save_txt and not save_with_object_id:
-                        # Save actual pixel coordinates
-                        txt_str += "%i %i %i %i" % (track.id, track.detclass, track.centroidarr[-1][0], track.centroidarr[-1][1])
+                        # Normalize coordinates
+                        txt_str += "%i %i %f %f" % (track.id, track.detclass, track.centroidarr[-1][0] / im0.shape[1], track.centroidarr[-1][1] / im0.shape[0])
                         if save_bbox_dim:
-                            txt_str += " %i %i" % (np.abs(track.bbox_history[-1][2] - track.bbox_history[-1][0]), np.abs(track.bbox_history[-1][3] - track.bbox_history[-1][1]))
+                            txt_str += " %f %f" % (np.abs(track.bbox_history[-1][0] - track.bbox_history[-1][2]) / im0.shape[0], np.abs(track.bbox_history[-1][1] - track.bbox_history[-1][3]) / im0.shape[1])
                         txt_str += "\n"
                 
                 if save_txt and not save_with_object_id:
