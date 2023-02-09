@@ -144,7 +144,7 @@ def frame_to_timestamp(frame_num, fps):
     minutes = int((total_seconds % 3600) // 60)
     seconds = int(total_seconds % 60)
     milliseconds = int((total_seconds - int(total_seconds)) * 1000)
-    return '{:03d}:{:02d}:{:02d}.{:04d}'.format(hours, minutes, seconds, milliseconds)
+    return '{:03d}:{:02d}:{:02d}.{:03d}'.format(hours, minutes, seconds, milliseconds)
 
 if __name__ == '__main__':
 
@@ -227,16 +227,16 @@ if __name__ == '__main__':
     test_check_box_position (box,line)
 
     # Test case 1: Frame number = 0, fps = 30
-    assert frame_to_timestamp(0, 30) == '000:00:00.0000'
+    assert frame_to_timestamp(0, 30) == '000:00:00.000'
 
     # Test case 2: Frame number = 1, fps = 30
-    assert frame_to_timestamp(1, 30) == '000:00:00.0333'
+    assert frame_to_timestamp(1, 30) == '000:00:00.333'
 
     # Test case 3: Frame number = 900, fps = 30
-    assert frame_to_timestamp(900, 30) == '000:15:00.0000'
+    assert frame_to_timestamp(900, 30) == '000:15:00.000'
 
     # Test case 4: Frame number = 901, fps = 30
-    assert frame_to_timestamp(901, 30) == '000:15:00.0333'
+    assert frame_to_timestamp(901, 30) == '000:15:00.333'
 
     # Test case 5: Frame number = 7200, fps = 24
-    assert frame_to_timestamp(7200, 24) == '002:00:00.0000'
+    assert frame_to_timestamp(7200, 24) == '002:00:00.000'
