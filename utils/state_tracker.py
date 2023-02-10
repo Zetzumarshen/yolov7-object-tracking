@@ -1,5 +1,5 @@
 import pandas as pd
-from utils.count_utils import check_box_position, frame_to_timestamp, get_line_orientation
+# from utils.count_utils import check_box_position, frame_to_timestamp, get_line_orientation
 
 class BBoxState:
     def __init__(self, object_id, bbox_xyxy, class_label, class_confidence, orientation_label = None):
@@ -7,8 +7,30 @@ class BBoxState:
         self.class_label = class_label
         self.class_confidence = class_confidence
         self.bbox_xyxy = bbox_xyxy 
-        self.orientation_label = orientation_label
+        self.orientation_label = orientation_label # right, left, intersect, above, bottom
         self.in_out_counter = None
+        self.original_orientation_label = None
+
+    def set_origin_label(self, original_orientation_label):
+        self.original_orientation_label = original_orientation_label
+
+    def __getitem__(self, key):
+        if key == 'object_id':
+            return self.object_id
+        elif key == 'class_label':
+            return self.class_label
+        elif key == 'class_confidence':
+            return self.class_confidence
+        elif key == 'bbox_xyxy':
+            return self.bbox_xyxy
+        elif key == 'orientation_label':
+            return self.orientation_label
+        elif key == 'in_out_counter':
+            return self.in_out_counter
+        elif key == 'original_orientation_label':
+            return self.original_orientation_label
+        else:
+            raise KeyError("Key '{}' not found in BBoxState".format(key))
 
 class StateTracker:
     def __init__(self, line_roi, fps, in_orientation=None):
@@ -18,7 +40,7 @@ class StateTracker:
         Parameters:
         - line_roi (str): The region of interest of the line.
         - in_orientation (str): What counts as in orientation opposed to out orientation. 
-          Can be "left", "right", "above", or "bottom". E.g. if an object start from "right" and goes to "left", 
+          Can be "left", "right", "above", or "bottom". E.g. if an object start from "right" and goes to left, 
           then increment in_counter. Also if given nothing: 
             If line_roi is "horizontal", in_orientation defaults to "right" 
             If line_roi is "vertical", in_orientation defaults to "bottom"
@@ -83,19 +105,26 @@ class StateTracker:
 
         counter_timestamps = self.detect_change_in_out_counter()
         class_labels = self.agg_labels_and_conf_by_obj_id()
-        final_class_labels = self.get_highest_confidence(class_labels)
-        final_counts = self.get_final_count(counter_timestamps)
+        final_class_labels = self.get_highest_confidence()
+        final_counts = self.get_final_count()
         
         bboxes_dict = {bbox['object_id']: bbox for bbox in bboxes}
-        for c_timestamp in counter_timestamps:
-            bboxes_dict[c_timestamp.object_id]['timestamps'].append(c_timestamp)
-        for class_label in class_labels:
-            bboxes_dict[class_label.object_id]['class_labels'].append(class_label)
-        for final_count in final_counts:
-            bboxes_dict[final_count.object_id]['final_count'] = final_count.count
-        for final_class_label in final_class_labels:
-            bboxes_dict[final_class_label.object_id]['final_class_label'] = final_class_label.class_label
-            bboxes_dict[final_class_label.object_id]['final_class_confidence'] = final_class_label.class_confidence
+        if counter_timestamps:
+            for c_timestamp in counter_timestamps:
+                bboxes_dict[c_timestamp['object_id']]['timestamps'].append(c_timestamp)
+        
+        if class_labels:
+            for class_label in class_labels:
+                bboxes_dict[class_label['object_id']]['class_labels'].append(class_label)
+
+        if final_counts:
+            for final_count in final_counts:
+                bboxes_dict[final_count['object_id']]['final_count'] = final_count['count']
+        
+        if final_class_labels:
+            for final_class_label in final_class_labels:
+                bboxes_dict[final_class_label['object_id']]['final_class_label'] = final_class_label['class_label']
+                bboxes_dict[final_class_label['object_id']]['final_class_confidence'] = final_class_label['class_confidence']
         
         return list(bboxes_dict.values())
 
@@ -113,7 +142,10 @@ class StateTracker:
             'timestamp': The timestamp of the event in HHH:MM:SS.sss
         """
         obj_count_dict = {}
-        for d in self.detect_change_in_out_counter(self):
+        ds = self.detect_change_in_out_counter()
+        if not ds:
+            return []
+        for d in ds:
             obj_id = d['object_id']
             frame_num = d['frame_number']
             if obj_id not in obj_count_dict or frame_num > obj_count_dict[obj_id]['frame_number']:
@@ -132,7 +164,10 @@ class StateTracker:
             'class_confidence': a float representing the confidence in the class label
         """
         obj_conf_dict = {}
-        for d in self.agg_labels_and_conf_by_obj_id(self):
+        ds = self.agg_labels_and_conf_by_obj_id()
+        if not ds:
+            return []
+        for d in ds:
             obj_id = d['object_id']
             conf = d['class_confidence']
             if obj_id not in obj_conf_dict or conf > obj_conf_dict[obj_id]['class_confidence']:
@@ -185,11 +220,12 @@ class StateTracker:
                         result.append({'object_id': obj_id, 'frame_number': frame_number, 'count': 'out', 'timestamp': frame_to_timestamp(frame_number, self.fps)})
                     elif prev_count == -1 and count == 0:
                         result.append({'object_id': obj_id, 'frame_number': frame_number, 'count': 'return', 'timestamp': frame_to_timestamp(frame_number, self.fps)})
+        return result
 
 
     def agg_labels_and_conf_by_obj_id(self):
         """
-        Aggregate object labels and confidences by object ID.
+        Aggregate object labels and confidence by object ID.
 
         :Example output:
         [
@@ -203,14 +239,36 @@ class StateTracker:
         # Flatten the list of dictionaries
         flat_list = [item for sublist in self.state_history for item in sublist]
 
-        # Convert the list of dictionaries to a pandas DataFrame
-        df = pd.DataFrame(flat_list)
+        # Create a dictionary to store the aggregated results
+        result = {}
 
-        # Group the data by object_id and class_label and calculate the mean of class_confidence
-        df = df.groupby(['object_id', 'class_label']).mean().reset_index()
+        # Iterate over the flat list
+        for item in flat_list:
+            object_id = item['object_id']
+            class_label = item['class_label']
+            class_confidence = item['class_confidence']
 
-        # Convert the DataFrame back to a list of dictionaries
-        return df.to_dict('records')
+            # Check if the object ID already exists in the result dictionary
+            if object_id in result:
+                result[object_id]['class_confidence'] += class_confidence
+                result[object_id]['count'] += 1
+            else:
+                result[object_id] = {
+                    'object_id': object_id,
+                    'class_label': class_label,
+                    'class_confidence': class_confidence,
+                    'count': 1
+                }
+
+        # Calculate the average class confidence
+        for key, value in result.items():
+            result[key]['class_confidence'] /= value['count']
+
+        # Convert the result dictionary to a list of dictionaries
+        result_list = [value for key, value in result.items()]
+
+        return result_list
+
 
     def add_bounding_box(self, object_id, bbox_xyxy, class_label, class_confidence):
         """
@@ -223,12 +281,21 @@ class StateTracker:
         class_confidence (float): confidence score for the class label
 
         """
-        prev_frame_bbox_states = self.get_previous_frame_objects() if self.state_history else []
+        prev_frame_bbox_states = self.state_history[-2] if self.state_history else []
         prev_frame_bbox_state = next((x for x in prev_frame_bbox_states if x.object_id == object_id), None)
 
+
         curr_frame_bbox_state = BBoxState(object_id, bbox_xyxy, class_label, class_confidence)
-        curr_frame_bbox_state.orientation_label = check_box_position(curr_frame_bbox_state, self.line_roi)
-        curr_frame_bbox_state.in_out_counter = self.update_in_out_counter(self, prev_frame_bbox_state, curr_frame_bbox_state)
+        curr_frame_bbox_state.orientation_label = check_box_position(curr_frame_bbox_state.bbox_xyxy, self.line_roi)
+        
+
+        if prev_frame_bbox_state == None:
+            curr_frame_bbox_state.original_orientation_label = curr_frame_bbox_state.orientation_label
+            curr_frame_bbox_state.in_out_counter = self.update_in_out_counter(None, curr_frame_bbox_state)
+        else:
+            curr_frame_bbox_state.original_orientation_label = prev_frame_bbox_state.original_orientation_label
+            curr_frame_bbox_state.in_out_counter = self.update_in_out_counter(prev_frame_bbox_state, curr_frame_bbox_state)
+
 
         if self.state_history:
             self.state_history[-1].append(curr_frame_bbox_state)
@@ -247,30 +314,75 @@ class StateTracker:
         Returns:
         int: The updated in/out counter.
         """
-        line_orientation = get_line_orientation(self.line_roi)
         in_orientation = self.in_orientation
-        prev_in_out_counter = prev_frame_object_state.in_out_counter
-        
         curr_label = current_frame_object_state.orientation_label
+        original_orientation_label = current_frame_object_state.original_orientation_label
         if prev_frame_object_state == None:
             prev_label = None
+            prev_in_out_counter = 0
         else:
             prev_label = prev_frame_object_state.orientation_label 
+            prev_in_out_counter = prev_frame_object_state.in_out_counter
 
         if prev_label == None:
             return 1 if curr_label == "intersect" else 0
-        
-        in_out_delta = 0
-        if line_orientation == "horizontal":
-            if in_orientation == "bottom":
-                in_out_delta = 1 if prev_label == "bottom" and curr_label == "intersect" else -1 if prev_label == "above" and curr_label == "intersect" else 0
-            else: # from above
-                in_out_delta = -1 if prev_label == "bottom" and curr_label == "intersect" else 1 if prev_label == "above" and curr_label == "intersect" else 0
-        else: # vertical
-            if in_orientation == "right":
-                in_out_delta = 1 if prev_label == "right" and curr_label == "intersect" else -1 if prev_label == "left" and curr_label == "intersect" else 0
-            else: # from left
-                in_out_delta = -1 if prev_label == "right" and curr_label == "intersect" else 1 if prev_label == "left" and curr_label == "intersect" else 0
-        
-        return prev_in_out_counter + in_out_delta if prev_label == "intersect" and curr_label == "intersect" else in_out_delta
 
+        if prev_label == curr_label:
+            return prev_in_out_counter
+
+        if prev_label == "intersect":
+            if curr_label == original_orientation_label: 
+                return 0
+            else:
+                return 1 if curr_label != in_orientation else -1
+
+        if curr_label == "intersect":
+            return 1 if original_orientation_label == in_orientation else -1
+
+        return 1 if original_orientation_label == in_orientation else -1
+
+
+        
+    def process_frame(self):
+        """
+        This method will process the empty frame by appending an empty list to the `state_history` attribute.
+        """
+        self.state_history.append([])
+
+if __name__ == '__main__':
+    import json
+    from count_utils import *
+    #sys.path.append('/..')
+    
+    s = StateTracker((10,0,10,50),1,"left")
+
+
+    s.process_frame()
+    s.process_frame()
+    s.process_frame()
+    s.add_bounding_box(1,[11,11,16,16],'person',0.23)
+    s.add_bounding_box(2,[30,30,32,32],'person',0.50)
+
+    s.process_frame()
+    s.add_bounding_box(1,[7,7,12,12],'person',0.23)
+    s.add_bounding_box(2,[7,7,12,12],'person',0.52)
+    
+    s.process_frame()
+    s.add_bounding_box(1,[11,11,16,16],'person',0.23)
+    s.add_bounding_box(2,[30,30,32,32],'person',0.50)
+    
+    s.process_frame()
+    s.add_bounding_box(1,[7,7,12,12],'person',0.23)
+    s.add_bounding_box(2,[7,7,12,12],'person',0.52)
+
+    s.process_frame()
+    s.add_bounding_box(1,[7,7,12,12],'person',0.23)
+    s.add_bounding_box(2,[7,7,12,12],'person',0.52)
+
+    s.process_frame()
+    s.add_bounding_box(1,[0,0,5,5],'person',0.23)
+    s.add_bounding_box(2,[30,30,32,32],'person',0.55)
+    
+    x = s.get_final_bboxes()
+    json_string = json.dumps(x) 
+    print(json_string)
