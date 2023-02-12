@@ -201,6 +201,15 @@ class LoadImages:  # for inference
         self.cap = cv2.VideoCapture(path)
         self.nframes = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+    def get_fps(self):
+        if not self.video_flag[self.count]:
+            raise Exception("Current input is not a video.")
+
+        if sum(self.video_flag) > 1:
+            raise Exception("Class instance has multiple videos, which one's fps you want to retrieve?")
+
+        return self.cap.get(cv2.CAP_PROP_FPS)
+
     def __len__(self):
         return self.nf  # number of files
 
@@ -319,6 +328,9 @@ class LoadStreams:  # multiple IP or RTSP cameras
                 time.sleep(1 / self.fps)  # wait time
             else:
                 time.sleep(0.2)   # in rtsp situation self.fps may be zero. to avoid div by zero, take constant sleep.
+
+    def get_fps(self):
+        return self.fps
 
     def __iter__(self):
         self.count = -1

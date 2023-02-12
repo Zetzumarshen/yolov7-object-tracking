@@ -18,7 +18,8 @@ from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, \
                 time_synchronized, TracedModel
 from utils.download_weights import download
-from utils.count_utils import check_box_position
+from utils.count_utils import check_box_position, get_line_orientation
+from utils.state_tracker import StateTracker, BBoxState
 
 #For SORT tracking
 import skimage
@@ -55,9 +56,64 @@ def draw_boxes(img, bbox, identities=None, categories=None, names=None, save_wit
     return img
 #..............................................................................
 
+def insert_boxes_to_statetracker(statetracker: StateTracker, bbox, identities, categories, names, confidences):
+    for i, box in enumerate(bbox):
+        #x1, y1, x2, y2 = [int(i) for i in box]
+        cat = int(categories[i]) if categories is not None else 0
+        id = int(identities[i]) if identities is not None else 0
+        conf = confidences[i] if confidences is not None else 0
+        statetracker.add_bounding_box(id, box, names[cat], conf)
+
+def draw_in_out_counter(img, in_count, out_count):
+    # get image height and width
+    height, width = img.shape[:2]
+    
+    # set font type, font scale and thickness
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 1
+    thickness = 2
+    
+    # set text color and position
+    text_color = (255, 0, 0) # blue
+    text_position_in = (int(width / 4), int(height / 2))
+    text_position_out = (int(width / 4 * 3), int(height / 2))
+    
+    # draw in_count text on the image
+    cv2.putText(img, "In Count: {}".format(in_count), text_position_in, font, 
+                font_scale, text_color, thickness, cv2.LINE_AA)
+    
+    # draw out_count text on the image
+    cv2.putText(img, "Out Count: {}".format(out_count), text_position_out, font, 
+                font_scale, text_color, thickness, cv2.LINE_AA)
+    
+    return img
+
+def draw_lines(img, bboxes, line):
+    x1, y1, x2, y2 = line
+    
+    # check if bbox intersects line
+    is_intersect = False
+    for i, box in bboxes:
+        if check_box_position(box, line) == "intersect":
+            is_intersect = True
+            break
+    
+    # draw a line for region of interest
+    start_point = (x1, y1)
+    end_point = (x2, y2)
+    if is_intersect:
+        cv2.line(img, start_point, end_point, (255,0,0), 4)
+    else:
+        cv2.line(img, start_point, end_point, (122,255,0), 4)
+
 
 def detect(save_img=False):
     source, weights, view_img, save_txt, imgsz, trace, colored_trk, save_bbox_dim, save_with_object_id= opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace, opt.colored_trk, opt.save_bbox_dim, opt.save_with_object_id
+    # placeholder params
+    line_roi = (500,0,480,800) 
+    line_orientation =  get_line_orientation(line_roi)
+    in_orientation = "right"
+
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
         ('rtsp://', 'rtmp://', 'http://', 'https://'))
@@ -118,7 +174,11 @@ def detect(save_img=False):
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride)
     else:
+        # NOTE: loadImages can load a couple videos at once, it might have different fps and breakthings
         dataset = LoadImages(source, img_size=imgsz, stride=stride)
+
+    # Initiate statetracker
+    statetracker = StateTracker(line_roi, dataset.get_fps(), in_)
 
     # Get names and colors
     names = model.module.names if hasattr(model, 'module') else model.names
@@ -132,7 +192,6 @@ def detect(save_img=False):
 
     t0 = time.time()
 
-    
     for path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -161,9 +220,6 @@ def detect(save_img=False):
         if classify:
             pred = apply_classifier(pred, modelc, img, im0s)
 
-
-
-
         # Process detections
         for i, det in enumerate(pred):  # detections per image
             if webcam:  # batch_size >= 1
@@ -175,6 +231,14 @@ def detect(save_img=False):
             save_path = str(save_dir / p.name)  # img.jpg
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+
+            # advance statetracker frame
+            statetracker.process_frame()
+
+            # draw counter
+            statetracker.update_in_out_counter()
+            draw_in_out_counter(im0, statetracker.curr_in_count, statetracker.curr_out_count)
+
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
@@ -190,19 +254,22 @@ def detect(save_img=False):
                 
                 # NOTE: We send in detected object class too
                 for x1,y1,x2,y2,conf,detclass in det.cpu().detach().numpy():
-                    dets_to_sort = np.vstack((dets_to_sort, 
-                                np.array([x1, y1, x2, y2, conf, detclass])))
+                    # NOTE: dets_to_sort structure [x1, y1, x2, y2, conf, detclass]
+                    dets_to_sort = np.vstack((dets_to_sort, np.array([x1, y1, x2, y2, conf, detclass])))
                 
                 # Run SORT
+                # NOTE: tracked_dets structure: [x1,y1,x2,y2,0,object_id]
                 tracked_dets = sort_tracker.update(dets_to_sort)
-                tracks =sort_tracker.getTrackers()
+                tracks = sort_tracker.getTrackers()
+
+                
 
                 txt_str = ""
 
                 #loop over tracks
                 for track in tracks:
                     # color = compute_color_for_labels(id)
-                    #draw colored tracks
+                    # draw colored tracks
                     if colored_trk:
                         [cv2.line(im0, (int(track.centroidarr[i][0]),
                                     int(track.centroidarr[i][1])), 
@@ -232,24 +299,14 @@ def detect(save_img=False):
                     with open(txt_path + '.txt', 'a') as f:
                         f.write(txt_str)
 
-                # draw a line for region of interest
-                line = [550, 0, 550, 1280]
-                start_point = (line[0], line[1])
-                end_point = (line[2], line[3])
-                cv2.line(im0, start_point, end_point, (124,252,0), 4) 
-
                 # draw boxes for visualization
                 if len(tracked_dets)>0:
                     bbox_xyxy = tracked_dets[:,:4]
                     identities = tracked_dets[:, 8]
                     categories = tracked_dets[:, 4]
+                    confidences = dets_to_sort[:, 4]
                     draw_boxes(im0, bbox_xyxy, identities, categories, names, save_with_object_id, txt_path)
-
-                    # check if bbox intersects line
-                    for i, box in enumerate(bbox_xyxy):
-                        print(box)
-                        if check_box_position(box, line) == "intersect":
-                            cv2.line(im0, start_point, end_point, (255,0,0), 4)  
+                    insert_boxes_to_statetracker(im0, statetracker, bbox_xyxy, identities, categories, names, confidences)    
                 #........................................................
                 
             # Print time (inference + NMS)
@@ -316,6 +373,17 @@ if __name__ == '__main__':
     parser.add_argument('--save-bbox-dim', action='store_true', help='save bounding box dimensions with --save-txt tracks')
     parser.add_argument('--save-with-object-id', action='store_true', help='save results with object id to *.txt')
 
+    # Line orientation
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('-v', '--vertical', action='store_true', help='vertical line')
+    group.add_argument('-H', '--horizontal', action='store_true', help='horizontal line')
+
+    # Vertical line arguments
+    parser.add_argument('--line-x', nargs=2, type=int, help='start and end x coordinate for vertical line')
+
+    # Horizontal line arguments
+    parser.add_argument('--line-y', nargs=2, type=int, help='start and end y coordinate for horizontal line')
+    
     parser.set_defaults(download=True)
     opt = parser.parse_args()
     print(opt)

@@ -247,6 +247,7 @@ class Sort(object):
         matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets, trks, self.iou_threshold)
         
         # Update matched trackers with assigned detections
+        # Discards the confidence level information
         for m in matched:
             self.trackers[m[1]].update(dets[m[0], :])
             
