@@ -109,10 +109,7 @@ def draw_lines(img, bboxes, line):
 
 def detect(save_img=False):
     source, weights, view_img, save_txt, imgsz, trace, colored_trk, save_bbox_dim, save_with_object_id= opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size, not opt.no_trace, opt.colored_trk, opt.save_bbox_dim, opt.save_with_object_id
-    # placeholder params
-    line_roi = (500,0,480,800) 
-    line_orientation =  get_line_orientation(line_roi)
-    in_orientation = "right"
+
 
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
     webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
@@ -178,7 +175,10 @@ def detect(save_img=False):
         dataset = LoadImages(source, img_size=imgsz, stride=stride)
 
     # Initiate statetracker
-    statetracker = StateTracker(line_roi, dataset.get_fps(), in_)
+    # placeholder params
+    line_roi = (500,0,480,800) 
+    in_orientation = "right"
+    statetracker = StateTracker(line_roi, dataset.get_fps(), in_orientation )
 
     # Get names and colors
     names = model.module.names if hasattr(model, 'module') else model.names
@@ -373,16 +373,16 @@ if __name__ == '__main__':
     parser.add_argument('--save-bbox-dim', action='store_true', help='save bounding box dimensions with --save-txt tracks')
     parser.add_argument('--save-with-object-id', action='store_true', help='save results with object id to *.txt')
 
-    # Line orientation
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('-v', '--vertical', action='store_true', help='vertical line')
-    group.add_argument('-H', '--horizontal', action='store_true', help='horizontal line')
+    # # Line orientation
+    # group = parser.add_mutually_exclusive_group(required=True)
+    # group.add_argument('-v', '--vertical', action='store_true', help='vertical line')
+    # group.add_argument('-H', '--horizontal', action='store_true', help='horizontal line')
 
-    # Vertical line arguments
-    parser.add_argument('--line-x', nargs=2, type=int, help='start and end x coordinate for vertical line')
+    # # Vertical line arguments
+    # parser.add_argument('--line-x', nargs=2, type=int, help='start and end x coordinate for vertical line')
 
-    # Horizontal line arguments
-    parser.add_argument('--line-y', nargs=2, type=int, help='start and end y coordinate for horizontal line')
+    # # Horizontal line arguments
+    # parser.add_argument('--line-y', nargs=2, type=int, help='start and end y coordinate for horizontal line')
     
     parser.set_defaults(download=True)
     opt = parser.parse_args()

@@ -55,6 +55,8 @@ class StateTracker:
         self.state_history = []
         self.fps = fps
         self.line_roi = line_roi # region of interest
+        self.curr_in_count = 0
+        self.curr_out_count = 0
 
         if get_line_orientation(line_roi) == "vertical":
             if in_orientation == None:
@@ -80,10 +82,10 @@ class StateTracker:
             object_id (int): The id of the object
             final_class_label (str): final class label of the object, e.g. "truck"
 	        final_class_confidence (float): confidence in the final class label
-            final_count (str): final counter for this object, e.g. "in","out","return" 
+            final_count (str): final counter for this object, e.g. "in","out","return-in","return-out" 
             timestamps (list of dicts):
                 frame_number (int): The number of the frame in which the change in `in_out_counter` was detected
-                count (str): The change in `in_out_counter` ('in', 'out', 'return')
+                count (str): The change in `in_out_counter` ('in', 'out', 'return-in' and 'return-out')
                 timestamp (str): The timestamp of the event in HHH:MM:SS.sss
             class_labels (list of dicts):
                 class_label (str): class label of the object
@@ -127,6 +129,21 @@ class StateTracker:
                 bboxes_dict[final_class_label['object_id']]['final_class_confidence'] = final_class_label['class_confidence']
         
         return list(bboxes_dict.values())
+
+    def update_state_tracker_in_out_counter(self):
+        ds = self.get_final_count()
+        self.curr_in_count = 0
+        self.curr_out_count = 0
+        for d in ds:
+            if d['count'] == "in":
+                self.curr_in_count += 1
+            elif d['count'] == 'return-in':
+                self.curr_in_count -= 1
+            elif d['count'] == "out":
+                self.curr_out_count += 1
+            elif d['count'] == "return-out":
+                self.curr_out_count -= 1                
+
 
     def get_final_count(self):
         """
@@ -179,13 +196,13 @@ class StateTracker:
         """
         This function takes a list of `state_history` as input and detects the changes in the `in_out_counter` for each `object_id` 
         in each frame. It returns a list of dictionaries that contains information about the `object_id`, `frame_number`, 
-        the change in the `in_out_counter` (i.e., 'in', 'out', 'return'), and the timestamp. 
+        the change in the `in_out_counter` (i.e., 'in', 'out', 'return-in' and 'return-out'), and the timestamp. 
 
         Returns:
             result (list): A list of dictionaries, where each dictionary contains the following key-value pairs:
                 object_id (int): The id of the object
                 frame_number (int): The number of the frame in which the change in `in_out_counter` was detected
-                count (str): The change in `in_out_counter` ('in', 'out', 'return')
+                count (str): The change in `in_out_counter` ('in', 'out', 'return-in' and 'return-out')
                 timestamp (str): The timestamp of the event in HHH:MM:SS.sss
             
         Example output:
@@ -215,11 +232,11 @@ class StateTracker:
                     if prev_count == 0 and count == 1:
                         result.append({'object_id': obj_id, 'frame_number': frame_number, 'count': 'in', 'timestamp': frame_to_timestamp(frame_number, self.fps)})
                     elif prev_count == 1 and count == 0:
-                        result.append({'object_id': obj_id, 'frame_number': frame_number, 'count': 'return', 'timestamp': frame_to_timestamp(frame_number, self.fps)})
+                        result.append({'object_id': obj_id, 'frame_number': frame_number, 'count': 'return-in', 'timestamp': frame_to_timestamp(frame_number, self.fps)})
                     elif prev_count == 0 and count == -1:
                         result.append({'object_id': obj_id, 'frame_number': frame_number, 'count': 'out', 'timestamp': frame_to_timestamp(frame_number, self.fps)})
                     elif prev_count == -1 and count == 0:
-                        result.append({'object_id': obj_id, 'frame_number': frame_number, 'count': 'return', 'timestamp': frame_to_timestamp(frame_number, self.fps)})
+                        result.append({'object_id': obj_id, 'frame_number': frame_number, 'count': 'return-out', 'timestamp': frame_to_timestamp(frame_number, self.fps)})
         return result
 
 
@@ -296,7 +313,6 @@ class StateTracker:
             curr_frame_bbox_state.original_orientation_label = prev_frame_bbox_state.original_orientation_label
             curr_frame_bbox_state.in_out_counter = self.update_in_out_counter(prev_frame_bbox_state, curr_frame_bbox_state)
 
-
         if self.state_history:
             self.state_history[-1].append(curr_frame_bbox_state)
         else:
@@ -336,17 +352,13 @@ class StateTracker:
             else:
                 return 1 if curr_label != in_orientation else -1
 
-        if curr_label == "intersect":
-            return 1 if original_orientation_label == in_orientation else -1
-
         return 1 if original_orientation_label == in_orientation else -1
 
-
-        
     def process_frame(self):
         """
         This method will process the empty frame by appending an empty list to the `state_history` attribute.
         """
+
         self.state_history.append([])
 
 if __name__ == '__main__':
