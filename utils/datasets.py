@@ -147,6 +147,7 @@ class LoadImages:  # for inference
         self.nf = ni + nv  # number of files
         self.video_flag = [False] * ni + [True] * nv
         self.mode = 'image'
+        self.count = 0
         if any(videos):
             self.new_video(videos[0])  # new video
         else:

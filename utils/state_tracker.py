@@ -1,5 +1,5 @@
 import pandas as pd
-# from utils.count_utils import check_box_position, frame_to_timestamp, get_line_orientation
+from utils.count_utils import check_box_position, frame_to_timestamp, get_line_orientation
 
 class BBoxState:
     def __init__(self, object_id, bbox_xyxy, class_label, class_confidence, orientation_label = None):
@@ -298,7 +298,7 @@ class StateTracker:
         class_confidence (float): confidence score for the class label
 
         """
-        prev_frame_bbox_states = self.state_history[-2] if self.state_history else []
+        prev_frame_bbox_states = self.state_history[-2] if len(self.state_history) > 1 else []
         prev_frame_bbox_state = next((x for x in prev_frame_bbox_states if x.object_id == object_id), None)
 
 

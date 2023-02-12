@@ -93,7 +93,7 @@ def draw_lines(img, bboxes, line):
     
     # check if bbox intersects line
     is_intersect = False
-    for i, box in bboxes:
+    for box in bboxes:
         if check_box_position(box, line) == "intersect":
             is_intersect = True
             break
@@ -236,7 +236,7 @@ def detect(save_img=False):
             statetracker.process_frame()
 
             # draw counter
-            statetracker.update_in_out_counter()
+            statetracker.update_state_tracker_in_out_counter()
             draw_in_out_counter(im0, statetracker.curr_in_count, statetracker.curr_out_count)
 
             if len(det):
@@ -299,6 +299,8 @@ def detect(save_img=False):
                     with open(txt_path + '.txt', 'a') as f:
                         f.write(txt_str)
 
+                
+
                 # draw boxes for visualization
                 if len(tracked_dets)>0:
                     bbox_xyxy = tracked_dets[:,:4]
@@ -306,7 +308,8 @@ def detect(save_img=False):
                     categories = tracked_dets[:, 4]
                     confidences = dets_to_sort[:, 4]
                     draw_boxes(im0, bbox_xyxy, identities, categories, names, save_with_object_id, txt_path)
-                    insert_boxes_to_statetracker(im0, statetracker, bbox_xyxy, identities, categories, names, confidences)    
+                    draw_lines(im0, bbox_xyxy, line_roi)
+                    insert_boxes_to_statetracker(statetracker, bbox_xyxy, identities, categories, names, confidences)    
                 #........................................................
                 
             # Print time (inference + NMS)
