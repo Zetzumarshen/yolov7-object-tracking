@@ -18,8 +18,9 @@ from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, \
                 time_synchronized, TracedModel
 from utils.download_weights import download
-from utils.count_utils import check_box_position, get_line_orientation
-from utils.state_tracker import StateTracker, BBoxState
+from utils.count_utils import check_box_position
+from utils.state_tracker import StateTracker
+import json
 
 #For SORT tracking
 import skimage
@@ -346,6 +347,10 @@ def detect(save_img=False):
     if save_txt or save_img or save_with_object_id:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         #print(f"Results saved to {save_dir}{s}")
+
+    json_data = json.dumps(statetracker.get_final_bboxes())
+    with open("data.json","w") as file:
+        file.write(json_data)
 
     print(f'Done. ({time.time() - t0:.3f}s)')
 
