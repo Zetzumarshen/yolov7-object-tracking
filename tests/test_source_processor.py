@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 
 if __name__ == '__main__':
    
@@ -11,11 +12,17 @@ if __name__ == '__main__':
     tested_dir = os.path.join(test_dir, '..')
     sys.path.append(tested_dir)
 
+    login_json = 'login.json'
     vid_path = 'mb-tiny.mp4'
     #source = vid_path
     #source = 0
-    source = 'rtsp://admin:NVR-Bakauheni01@10.2.4.166'
-    print("File exists" if os.path.exists(vid_path) else "File does not exist")
+
+    if os.path.exists(login_json):
+        with open('login.json', 'r') as f:
+            data = json.load(f)
+    else:
+        raise Exception('user login json not found')
+    source = 'rtsp://' + data['upass'] + '@' + data['ip_address']
 
     # Import util.py from the utils directory
     from processor.webcam import WebcamProcessor
