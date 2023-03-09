@@ -10,6 +10,7 @@ import time
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
+from utils.my_torch_utils import get_torch_backend
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -39,10 +40,11 @@ def torch_distributed_zero_first(local_rank: int):
 def init_torch_seeds(seed=0):
     # Speed-reproducibility tradeoff https://pytorch.org/docs/stable/notes/randomness.html
     torch.manual_seed(seed)
+    backend = get_torch_backend()
     if seed == 0:  # slower, more reproducible
-        cudnn.benchmark, cudnn.deterministic = False, True
+        backend.benchmark, backend.deterministic = False, True
     else:  # faster, less reproducible
-        cudnn.benchmark, cudnn.deterministic = True, False
+        backend.benchmark, backend.deterministic = True, False
 
 
 def date_modified(path=__file__):

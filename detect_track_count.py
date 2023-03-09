@@ -65,7 +65,7 @@ def insert_boxes_to_statetracker(statetracker: StateTracker, bbox, identities, c
         conf = confidences[i] if confidences is not None else 0
         statetracker.add_bounding_box(id, box, names[cat], conf)
 
-def draw_in_out_counter(img, in_count, out_count):
+def draw_in_out_counter(img, in_count=0, out_count=0):
     # get image height and width
     height, width = img.shape[:2]
     
@@ -75,9 +75,9 @@ def draw_in_out_counter(img, in_count, out_count):
     thickness = 2
     
     # set text color and position
-    text_color = (255, 0, 0) # blue
-    text_position_in = (int(width / 4), int(height / 2))
-    text_position_out = (int(width / 4 * 3), int(height / 2))
+    text_color = (255, 255, 255) # blue
+    text_position_in = (20, 20)
+    text_position_out = (20, 50)
     
     # draw in_count text on the image
     cv2.putText(img, "In Count: {}".format(in_count), text_position_in, font, 
@@ -178,7 +178,7 @@ def detect(save_img=False):
     # Initiate statetracker
     # placeholder params
     line_roi = (500,0,480,800) 
-    in_orientation = "right"
+    in_orientation = "left"
     statetracker = StateTracker(line_roi, dataset.get_fps(), in_orientation )
 
     # Get names and colors
@@ -238,6 +238,7 @@ def detect(save_img=False):
 
             # draw counter
             statetracker.update_state_tracker_in_out_counter()
+            print(len(statetracker.state_history), statetracker.curr_in_count, statetracker.curr_out_count)
             draw_in_out_counter(im0, statetracker.curr_in_count, statetracker.curr_out_count)
 
             if len(det):
@@ -262,8 +263,6 @@ def detect(save_img=False):
                 # NOTE: tracked_dets structure: [x1,y1,x2,y2,0,object_id]
                 tracked_dets = sort_tracker.update(dets_to_sort)
                 tracks = sort_tracker.getTrackers()
-
-                
 
                 txt_str = ""
 
@@ -298,9 +297,7 @@ def detect(save_img=False):
                 
                 if save_txt and not save_with_object_id:
                     with open(txt_path + '.txt', 'a') as f:
-                        f.write(txt_str)
-
-                
+                        f.write(txt_str)  
 
                 # draw boxes for visualization
                 if len(tracked_dets)>0:
@@ -352,7 +349,7 @@ def detect(save_img=False):
     with open("data.json","w") as file:
         file.write(json_data)
 
-    print(f'Done. ({time.time() - t0:.3f}s)')
+    print(f'Done. ({time.time() - t0:.3f}s)')   
 
 
 if __name__ == '__main__':

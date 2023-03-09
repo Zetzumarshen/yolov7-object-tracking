@@ -1,4 +1,4 @@
-import pandas as pd
+import json
 from utils.count_utils import check_box_position, frame_to_timestamp, get_line_orientation
 
 class BBoxState:
@@ -69,6 +69,14 @@ class StateTracker:
             else:
                 self.in_orientation = in_orientation 
     
+    def get_latest_bbox_state(self, object_id):
+        for state in reversed(self.state_history):
+            for bbox_state in state:
+                if bbox_state.object_id == object_id:
+                    return bbox_state
+        return None
+
+
     def get_final_bboxes(self):
         """
         This function aggregates information from the `state_history` attribute and returns a list of dictionaries representing the 
@@ -298,9 +306,7 @@ class StateTracker:
         class_confidence (float): confidence score for the class label
 
         """
-        prev_frame_bbox_states = self.state_history[-2] if len(self.state_history) > 1 else []
-        prev_frame_bbox_state = next((x for x in prev_frame_bbox_states if x.object_id == object_id), None)
-
+        prev_frame_bbox_state = self.get_latest_bbox_state(object_id)
 
         curr_frame_bbox_state = BBoxState(object_id, bbox_xyxy, class_label, class_confidence)
         curr_frame_bbox_state.orientation_label = check_box_position(curr_frame_bbox_state.bbox_xyxy, self.line_roi)
@@ -361,40 +367,3 @@ class StateTracker:
 
         self.state_history.append([])
 
-if __name__ == '__main__':
-    import json
-    from count_utils import *
-    #sys.path.append('/..')
-    
-    s = StateTracker((10,0,10,50),1,"left")
-
-
-    s.process_frame()
-    s.process_frame()
-    s.process_frame()
-    s.add_bounding_box(1,[11,11,16,16],'person',0.23)
-    s.add_bounding_box(2,[30,30,32,32],'person',0.50)
-
-    s.process_frame()
-    s.add_bounding_box(1,[7,7,12,12],'person',0.23)
-    s.add_bounding_box(2,[7,7,12,12],'person',0.52)
-    
-    s.process_frame()
-    s.add_bounding_box(1,[11,11,16,16],'person',0.23)
-    s.add_bounding_box(2,[30,30,32,32],'person',0.50)
-    
-    s.process_frame()
-    s.add_bounding_box(1,[7,7,12,12],'person',0.23)
-    s.add_bounding_box(2,[7,7,12,12],'person',0.52)
-
-    s.process_frame()
-    s.add_bounding_box(1,[7,7,12,12],'person',0.23)
-    s.add_bounding_box(2,[7,7,12,12],'person',0.52)
-
-    s.process_frame()
-    s.add_bounding_box(1,[0,0,5,5],'person',0.23)
-    s.add_bounding_box(2,[30,30,32,32],'person',0.55)
-    
-    x = s.get_final_bboxes()
-    json_string = json.dumps(x) 
-    print(json_string)
