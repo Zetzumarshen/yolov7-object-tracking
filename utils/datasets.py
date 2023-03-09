@@ -216,12 +216,16 @@ class LoadImages:  # for inference
 
 
 class LoadWebcam:  # for inference
-    def __init__(self, pipe='0', img_size=640, stride=32):
+    def __init__(self, source='0', img_size=640, stride=32):
         self.img_size = img_size
         self.stride = stride
+        self.mode = 'webcam'
 
-        if pipe.isnumeric():
-            pipe = eval(pipe)  # local camera
+        if str(source).isnumeric():
+            pipe = source  # local camera
+        else:
+            pipe = source
+
         # pipe = 'rtsp://192.168.1.64/1'  # IP camera
         # pipe = 'rtsp://username:password@192.168.1.64/1'  # IP camera with login
         # pipe = 'http://wmccpinetop.axiscam.net/mjpg/video.mjpg'  # IP golf camera
@@ -229,6 +233,7 @@ class LoadWebcam:  # for inference
         self.pipe = pipe
         self.cap = cv2.VideoCapture(pipe)  # video capture object
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # set buffer size
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
 
     def __iter__(self):
         self.count = -1
@@ -267,13 +272,15 @@ class LoadWebcam:  # for inference
         img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
         img = np.ascontiguousarray(img)
 
-        return img_path, img, img0, None
+        return img_path, img, img0, self.cap
 
     def __len__(self):
         return 0
 
+    def get_fps(self):
+        return self.fps
 
-class LoadStreams:  # multiple IP or RTSP cameras
+class LoadStreams:  # multiple IP or RTSP cameras or videos
     def __init__(self, sources='streams.txt', img_size=640, stride=32):
         self.mode = 'stream'
         self.img_size = img_size

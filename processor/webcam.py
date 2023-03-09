@@ -10,7 +10,7 @@ from random import randint
 from utils.my_torch_utils import get_torch_backend
 
 from models.experimental import attempt_load
-from utils.datasets import LoadStreams, LoadImages
+from utils.datasets import LoadStreams, LoadImages, LoadWebcam
 from utils.general import check_img_size, check_requirements, \
                 check_imshow, non_max_suppression, apply_classifier, \
                 scale_coords, xyxy2xywh, strip_optimizer, set_logging, \
@@ -27,7 +27,7 @@ import json
 import skimage
 from sort import *
 
-class SourceProcessor:
+class WebcamProcessor:
     def __init__(self, weights='yolov7.pt', 
                  source='inference/images', is_download=True,
                  img_size=640, conf_thres=0.25, iou_thres=0.45, 
@@ -56,7 +56,7 @@ class SourceProcessor:
         # setting state tracker
         self.line_roi = line_roi
         self.in_orientation = in_orientation
-        self.download = is_download
+        self.is_download = is_download
 
         # setting flags
         self.is_exist_ok = is_exist_ok
@@ -74,7 +74,7 @@ class SourceProcessor:
 
         if is_download and not os.path.exists(str(weights)):
             print('Model weights not found. Attempting to download now...')
-            is_download('./')
+            download('./')
 
 
     def detect(self):
@@ -85,24 +85,8 @@ class SourceProcessor:
                     strip_optimizer(opt.weights)
             else:
                 self._detect()
-    
 
-    def download_weights(self, url, path):
-        if os.path.exists(path):
-            return
-
-        print(f'Downloading {url} to {path}')
-        response = requests.get(url, stream=True)
-
-        # Raise an exception if the response status is not OK
-        response.raise_for_status()
-
-        # Write the contents of the response to the file
-        with open(path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-
-    def draw_boxes(self, img, bbox, identities=None, categories=None, names=None, save_with_object_id=False, path=None,offset=(0, 0)):
+    def draw_boxes(self, img, bbox, identities=None, categories=None, names=None, save_with_object_id=False, path=None, offset=(0, 0)):
         for i, box in enumerate(bbox):
             x1, y1, x2, y2 = [int(i) for i in box]
             x1 += offset[0]
@@ -119,6 +103,7 @@ class SourceProcessor:
             cv2.putText(img, label, (x1, y1 - 5),cv2.FONT_HERSHEY_SIMPLEX, 
                         0.6, [255, 255, 255], 1)
             # cv2.circle(img, data, 6, color,-1)   #centroid of box
+
             txt_str = ""
             if save_with_object_id:
                 txt_str += "%i %i %f %f %f %f %f %f" % (
@@ -202,7 +187,7 @@ class SourceProcessor:
         half = device.type != 'cpu'  # half precision only supported on CUDA
         return device, half
     
-    def create_directory(self, project, name, exist_ok, save_txt, save_with_object_id):
+    def get_save_dir(self, project, name, exist_ok, save_txt, save_with_object_id):
         save_dir = Path(increment_path(Path(project) / name, exist_ok=exist_ok))  # increment run
         (save_dir / 'labels' if save_txt or save_with_object_id else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
         return save_dir
@@ -217,14 +202,19 @@ class SourceProcessor:
             model.half()  # to FP16
         return model, stride
 
-    def set_dataloader(self, webcam, source, imgsz, stride, backend):
-        if webcam:
+    def get_dataloader(self, source, source_type, imgsz, stride, backend):
+        if source_type == 'stream':
             check_imshow()
             backend.benchmark = True  # set True to speed up constant image size inference
             dataset = LoadStreams(source, img_size=imgsz, stride=stride)
-        else:
+        elif source_type == 'image':
             # NOTE: loadImages can load a couple videos at once, it might have different fps and breakthings
             dataset = LoadImages(source, img_size=imgsz, stride=stride)
+        elif source_type == 'webcam':
+            check_imshow()
+            backend.benchmark = True
+            dataset = LoadWebcam(source, imgsz, stride)
+
         return dataset
 
     def init_gpu(self, device, imgsz, model):
@@ -263,33 +253,37 @@ class SourceProcessor:
                         for i,_ in  enumerate(track.centroidarr) 
                         if i < len(track.centroidarr)-1 ] 
             
-    def update_coordinates_info(self, txt_str, save_bbox_dim,track, im0):
+    def get_coordinates_info(self, txt_str, save_bbox_dim,track, im0):
         # Normalize coordinates
         txt_str += "%i %i %f %f" % (track.id, track.detclass, track.centroidarr[-1][0] / im0.shape[1], track.centroidarr[-1][1] / im0.shape[0])
         if save_bbox_dim:
             txt_str += " %f %f" % (np.abs(track.bbox_history[-1][0] - track.bbox_history[-1][2]) / im0.shape[0], np.abs(track.bbox_history[-1][1] - track.bbox_history[-1][3]) / im0.shape[1])
         txt_str += "\n"
+        return txt_str
 
-    def save_result(self, save_img, dataset, save_path, im0, vid_cap, vid_path):
-        vid_writer = None
-        if save_img:
-            if dataset.mode == 'image':
-                cv2.imwrite(save_path, im0)
-                print(f" The image with the result is saved in: {save_path}")
-            else:  # 'video' or 'stream'
-                if vid_path != save_path:  # new video
-                    vid_path = save_path
-                    if isinstance(vid_writer, cv2.VideoWriter):
-                        vid_writer.release()  # release previous video writer
-                    if vid_cap:  # video
-                        fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                        w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                        h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                    else:  # stream
-                        fps, w, h = 30, im0.shape[1], im0.shape[0]
-                        save_path += '.mp4'
-                    vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
-                vid_writer.write(im0)
+    def save_result(self, source_type, save_path, im0, vid_cap, vid_path):
+        vid_writer = None        
+        if vid_path != save_path:  # new video
+            vid_path = save_path
+            if isinstance(vid_writer, cv2.VideoWriter):
+                vid_writer.release()  # release previous video writer
+            if vid_cap:  # video
+                fps = vid_cap.get(cv2.CAP_PROP_FPS)
+                w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            else:  # stream
+                fps, w, h = 30, im0.shape[1], im0.shape[0]
+                save_path += '.mp4'
+            vid_writer = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+        vid_writer.write(im0)
+
+    def get_source_type(self, source):
+        if str(source).isnumeric() or source.lower().startswith(('rtsp://', 'rtmp://', 'http://', 'https://')):
+            return 'webcam' # 0 is pipe
+        elif os.path.isfile(source) or source.endswith('.txt'):
+            return 'image'
+        else:
+            raise Exception('Source unhandled')
 
     def _detect(self, is_save_img=False):
         source = self.source
@@ -321,9 +315,9 @@ class SourceProcessor:
         # allocate variable
         vid_path, vid_writer, stride, dataset = None, None, None, None
     
-        is_save_img = not is_nosave and not source.endswith('.txt')  # save inference images
-        webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
-            ('rtsp://', 'rtmp://', 'http://', 'https://'))
+        source_type = self.get_source_type(source)
+        
+        is_save_img = not is_nosave # save inference images
 
         #.... Initialize SORT .... 
         sort_tracker = self.init_sort(5,2,0.2)
@@ -332,7 +326,7 @@ class SourceProcessor:
         rand_color_list = self.color_tracks()
 
         # Directories
-        save_dir = self.create_directory(project, name, is_exist_ok, is_save_txt, is_save_with_object_id)
+        save_dir = self.get_save_dir(project, name, is_exist_ok, is_save_txt, is_save_with_object_id)
 
         # Initialize device
         device, half = self.init_device(device)
@@ -341,7 +335,7 @@ class SourceProcessor:
         model, stride = self.load_model(device, weights, imgsz, trace, half)
 
         # Set Dataloader
-        dataset = self.set_dataloader(webcam, source, imgsz, stride, backend)
+        dataset = self.get_dataloader(source, source_type, imgsz, stride, backend)
 
         # Initiate statetracker
         statetracker = StateTracker(line_roi, dataset.get_fps(), in_orientation )
@@ -361,7 +355,7 @@ class SourceProcessor:
         # set timer
         t0 = time.time()
 
-        # Run inference
+        # Run inference for one video
         for path, img, im0s, vid_cap in dataset:
 
             # preprocess image
@@ -392,10 +386,7 @@ class SourceProcessor:
 
             # Process detections
             for i, det in enumerate(pred):  # detections per image
-                if webcam:  # batch_size >= 1
-                    p, s, im0, frame = path[i], '%g: ' % i, im0s[i].copy(), dataset.count
-                else:
-                    p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
+                p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
 
                 # save labels
                 p, save_path, txt_path = self.set_save_path(p, save_dir, dataset, frame)
@@ -443,7 +434,7 @@ class SourceProcessor:
                         
                         # prepare text if save_txt
                         if is_save_txt and not is_save_with_object_id:
-                            self.update_coordinates_info(txt_str, is_save_bbox_dim, track, im0)
+                            txt_str = self.get_coordinates_info(txt_str, is_save_bbox_dim, track, im0)
 
                     # write coordinates info into file
                     if is_save_txt and not is_save_with_object_id:
@@ -456,7 +447,7 @@ class SourceProcessor:
                         identities = tracked_dets[:, 8]
                         categories = tracked_dets[:, 4]
                         confidences = dets_to_sort[:, 4]
-                        self.draw_boxes(im0, bbox_xyxy, identities, categories, names, is_save_with_object_id, txt_path)
+                        self.draw_boxes(im0, bbox_xyxy, identities, categories, names, is_save_with_object_id)
                         self.draw_lines(im0, bbox_xyxy, line_roi)
                         self.insert_boxes_to_statetracker(statetracker, bbox_xyxy, identities, categories, names, confidences)    
                 # End processing if there are at least one detection ...................................
@@ -465,14 +456,15 @@ class SourceProcessor:
                 print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
                 
                 # Stream results
-                if is_view_img:
+                if is_view_img and (source_type == 'video' or source_type == 'webcam'):
                     cv2.imshow(str(p), im0)
                     if cv2.waitKey(1) == ord('q'):  # q to quit
                         cv2.destroyAllWindows()
                         raise StopIteration
 
                 # Save results (image with detections)
-                self.save_result(is_save_img, dataset, save_path, im0, vid_cap, vid_path)
+                if is_save_img:
+                    self.save_result(source_type, save_path, im0, vid_cap, vid_path)
 
             # End processing one image of a video ...................................
 
