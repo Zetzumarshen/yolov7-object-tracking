@@ -201,6 +201,10 @@ class LoadImages:  # for inference
         self.frame = 0
         self.cap = cv2.VideoCapture(path)
         self.nframes = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+        self.height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+
 
     def get_fps(self):
         if not self.video_flag[self.count]:
@@ -234,6 +238,8 @@ class LoadWebcam:  # for inference
         self.cap = cv2.VideoCapture(pipe)  # video capture object
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # set buffer size
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+        self.width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+        self.height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
     def __iter__(self):
         self.count = -1
@@ -286,6 +292,7 @@ class LoadStreams:  # multiple IP or RTSP cameras or videos
         self.img_size = img_size
         self.stride = stride
 
+
         if os.path.isfile(sources):
             with open(sources, 'r') as f:
                 sources = [x.strip() for x in f.read().strip().splitlines() if len(x.strip())]
@@ -307,7 +314,10 @@ class LoadStreams:  # multiple IP or RTSP cameras or videos
             assert cap.isOpened(), f'Failed to open {s}'
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            
             self.fps = cap.get(cv2.CAP_PROP_FPS) % 100
+            self.width = w
+            self.height = h
 
             _, self.imgs[i] = cap.read()  # guarantee first frame
             thread = Thread(target=self.update, args=([i, cap]), daemon=True)

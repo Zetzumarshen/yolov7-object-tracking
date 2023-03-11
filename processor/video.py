@@ -21,14 +21,15 @@ from utils.torch_utils import select_device, load_classifier, \
 from utils.download_weights import download
 from utils.count_utils import check_box_position
 from utils.state_tracker import StateTracker
-import json
+import datetime
 
 #For SORT tracking
 import skimage
 from sort import *
 
-class WebcamProcessor:
-    def __init__(self, weights='yolov7.pt', 
+
+class VideoProcessor:
+    def __init__(self, master=None, weights='yolov7.pt', 
                  source='inference/images', is_download=True,
                  img_size=640, conf_thres=0.25, iou_thres=0.45, 
                  device='', is_view_img=False, is_save_txt=False, 
@@ -36,7 +37,7 @@ class WebcamProcessor:
                  is_agnostic_nms=False, augment=False, is_update=False, 
                  project='runs/detect', name='object_tracking', 
                  is_exist_ok=False, is_no_trace=False, in_orientation = "right",
-                 is_colored_trk=False, is_save_bbox_dim=False, 
+                 is_colored_trk=False, is_save_bbox_dim=False, is_video_player = True,
                  is_save_with_object_id=False, line_roi=(500,0,480,800)):
         
         # setting models
@@ -52,12 +53,13 @@ class WebcamProcessor:
         self.update = is_update
         self.project = project
         self.name = name
-        self.cap = None
+        self.master = master
 
         # setting state tracker
         self.line_roi = line_roi
         self.in_orientation = in_orientation
         self.is_download = is_download
+        self.fps = None 
 
         # setting flags
         self.is_exist_ok = is_exist_ok
@@ -70,6 +72,8 @@ class WebcamProcessor:
         self.is_save_conf = is_save_conf
         self.is_nosave = is_nosave
         self.is_update = is_update
+        self.is_statetracking = False
+        self.is_video_player = is_video_player
 
         with torch.no_grad():
             self.save_dir = self.get_save_dir(self.project, self.name, self.is_exist_ok, self.is_save_txt, self.is_save_with_object_id)
@@ -84,22 +88,74 @@ class WebcamProcessor:
             self.device, self.half = self.init_device(self.device)
             self.model, self.stride = self.load_model(self.device, self.weights, self.img_size, self.is_trace, self.half)
             self.dataset = self.get_dataloader(self.source, self.source_type, self.img_size, self.stride, self.backend)
-            self.statetracker = StateTracker(self.line_roi, self.dataset.get_fps(), self.in_orientation)
             self.names = self.model.module.names if hasattr(self.model, 'module') else self.model.names
+            self.width = self.dataset.width
+            self.height = self.dataset.height
+            self.cap = self.dataset.cap
+            self.fps = self.dataset.fps
             self.init_gpu(self.device, img_size, self.model)
 
         if is_download and not os.path.exists(str(weights)):
             print('Model weights not found. Attempting to download now...')
             download('./')
 
-    def detect(self):
+    def process_frame(self):
         with torch.no_grad():
             if self.is_update:  # update all models (to fix SourceChangeWarning)
                 for self.weights in ['yolov7.pt']:
-                    self._detect()
+                    im0 = self._detect()
                     strip_optimizer(self.weights)
             else:
-                self._detect()
+                im0 = self._detect()
+        return  cv2.cvtColor(im0, cv2.COLOR_BGR2RGB)
+    
+    def get_current_timestamp(self):
+        """Returns the current frame timestamp in seconds."""
+        current_frame = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
+        return current_frame / self.fps
+
+    def seek_to_timestamp(self, timestamp):
+        """Seeks to the specified timestamp in seconds."""
+        frame_number = int(timestamp * self.fps)
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+
+    def get_duration(self):
+        """Returns the duration of the video in seconds."""
+        num_frames = self.cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        return num_frames / self.fps
+
+    def start_state_tracker(self):
+        self.is_statetracking = True
+        self.statetracker = StateTracker(self.line_roi, self.dataset.get_fps(), self.in_orientation, master=self, is_webcam= not self.is_video_player)
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.master.update_message(f"[{current_time}] ====START COUNTING====")
+
+    def counts_changed(self):
+        ls = self.statetracker.detect_change_in_out_counter()
+        if len(ls) > 0:
+            log_dict = ls[-1]
+            log_str =  f"[{log_dict['timestamp']}] {log_dict['object_id']}:{log_dict['class_label']}({log_dict['class_confidence']:.0%})  Moving {log_dict['count']}"
+            self.master.update_message(log_str)
+            print(log_str)
+
+    def stop_state_tracking(self):
+        self.is_statetracking = False
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.master.update_message(f"[{current_time}] ====END COUNTING====")
+        self.master.update_message(self.get_summary())
+        
+    def get_summary(self):
+        summary_str = "Vehicle counts: \n"
+        summary_str += f"{self.statetracker.truck_in_count} trucks in, \n"
+        summary_str += f"{self.statetracker.truck_out_count} trucks out, \n"
+        summary_str += f"{self.statetracker.car_in_count} cars in, \n"
+        summary_str += f"{self.statetracker.car_out_count} cars out, \n"
+        summary_str += f"{self.statetracker.motorcycle_in_count} motorcycles in, \n"
+        summary_str += f"{self.statetracker.motorcycle_out_count} motorcycles out, \n"
+        summary_str += f"{self.statetracker.bus_in_count} buses in, \n"
+        summary_str += f"{self.statetracker.bus_out_count} buses out.\n"
+        summary_str += f"============================"
+        return summary_str
 
     def _detect(self):
         is_colored_trk = self.is_colored_trk 
@@ -125,6 +181,7 @@ class WebcamProcessor:
 
             # setting video capture
             self.cap = vid_cap
+            self.fps = vid_cap.get(cv2.CAP_PROP_FPS)
 
             # preprocess image
             img = torch.from_numpy(img).to(self.device)
@@ -132,6 +189,7 @@ class WebcamProcessor:
             img /= 255.0  # 0 - 255 to 0.0 - 1.0
             if img.ndimension() == 3:
                 img = img.unsqueeze(0)
+
             # Warmup
             if self.device.type != 'cpu' and (self.old_img_b != img.shape[0] or self.old_img_h != img.shape[2] or self.old_img_w != img.shape[3]):
                 self.old_img_b = img.shape[0]
@@ -160,7 +218,8 @@ class WebcamProcessor:
                 gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]
 
                 # advance statetracker frame
-                self.statetracker.process_frame()
+                if self.is_statetracking == True:
+                    self.statetracker.process_frame()
 
                 # init bbox
                 bbox_xyxy = []
@@ -212,49 +271,25 @@ class WebcamProcessor:
                         categories = tracked_dets[:, 4]
                         confidences = dets_to_sort[:, 4]
                         self.draw_boxes(im0, bbox_xyxy, identities, categories, self.names, is_save_with_object_id)
-                        self.insert_boxes_to_statetracker(self.statetracker, bbox_xyxy, identities, categories, self.names, confidences)    
+                        if self.is_statetracking == True:
+                            self.insert_boxes_to_statetracker(self.statetracker, bbox_xyxy, identities, categories, self.names, confidences)    
                 # End processing if there are at least one detection ...................................
 
                 # draw line
                 self.draw_lines(im0, bbox_xyxy, line_roi)
 
                 # draw counter
-                self.statetracker.update_state_tracker_in_out_counter()
-                self.draw_in_out_counter(im0, self.statetracker)
-
-                ls = self.statetracker.detect_change_in_out_counter()
-                if len(ls) > 0:
-                    l = ls[-1]
-                    r = self.statetracker.get_highest_confidence_by_id(l['object_id'])
-                    l['class_label'] = r['class_label']
-                    l['class_confidence'] = r['class_confidence']
-                    print(l)
+                if self.is_statetracking == True:
+                    self.statetracker.update_state_tracker_in_out_counter()
+                    self.draw_in_out_counter(im0, self.statetracker)
 
                 # Print time (inference + NMS)
                 print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
-                
-                # Stream results
-                if is_view_img:
-                    cv2.imshow(str(p), im0)
-                    if cv2.waitKey(1) == ord('q'):  # q to quit
-                        cv2.destroyAllWindows()
-                        raise Exception
 
-                # Save results (image with detections)
-                if self.is_save_img:
-                    self.save_result(self.source_type, save_path, im0, vid_cap, self.vid_path)
-
+                return im0
             # End processing one image of a video ...................................
 
-        if is_save_txt or self.is_save_img or is_save_with_object_id:
-            s = f"\n{len(list(self.save_dir.glob('labels/*.txt')))} labels saved to {self.save_dir / 'labels'}" if is_save_txt else ''
-            #print(f"Results saved to {save_dir}{s}")
 
-        json_data = json.dumps(self.statetracker.get_final_bboxes())
-        with open("data.json","w") as file:
-            file.write(json_data)
-
-        print(f'Done. ({time.time() - t0:.3f}s)')   
 
     def draw_boxes(self, img, bbox, identities=None, categories=None, names=None, save_with_object_id=False, path=None, offset=(0, 0)):
         for i, box in enumerate(bbox):
@@ -294,9 +329,6 @@ class WebcamProcessor:
             statetracker.add_bounding_box(id, box, names[cat], conf)
 
     def draw_in_out_counter(self, img, statetracker):
-        # get image height and width
-        # height, width = img.shape[:2]
-        
         # set font type, font scale and thickness
         font = cv2.FONT_HERSHEY_SIMPLEX
         font_scale = 0.5

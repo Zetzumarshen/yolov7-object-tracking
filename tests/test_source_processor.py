@@ -14,7 +14,7 @@ if __name__ == '__main__':
 
     login_json = 'login.json'
     vid_path = 'mb-tiny.mp4'
-    #source = vid_path
+    source = vid_path
     #source = 0
 
     if os.path.exists(login_json):
@@ -22,20 +22,23 @@ if __name__ == '__main__':
             data = json.load(f)
     else:
         raise Exception('user login json not found')
-    source = 'rtsp://' + data['upass'] + '@' + data['ip_address']
+    #source = 'rtsp://' + data['upass'] + '@' + data['ip_address']
 
     # Import util.py from the utils directory
     from processor.webcam import WebcamProcessor
 
     src = WebcamProcessor(is_download=False,
-                          conf_thres=0.5,
                           is_save_txt=True,
                           is_save_conf=True,
                           is_agnostic_nms=True,
+                          is_save_bbox_dim=True,
+                          is_view_img=True,
+                          
+                          in_orientation='left',
                           source=source,
                           name='refactor',
-                          is_save_bbox_dim=True,
-                          is_view_img=True
+                          conf_thres=0.5,
+                          line_roi=(1000,0,1000,800)
                           )
 
     src.detect()
